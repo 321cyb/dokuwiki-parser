@@ -24,32 +24,28 @@ const (
 )
 
 type Context interface {
-	GetParent() Context
-	GetChildren() []Context
-	AppendChild(Context)
+	GetParentContext() *Context
 }
 
 type BaseContext struct {
-	parent   Context
-	children []Context
+	parent *Context
 }
 
-func (p *BaseContext) GetParent() Context {
+func (p *BaseContext) GetParentContext() *Context {
 	return p.parent
 }
 
-func (p *BaseContext) GetChildren() []Context {
-	return p.children
-}
-
-func (p *BaseContext) AppendChild(c Context) {
-	p.children = append(p.children, c)
+type ParseUnit struct {
+	BaseContext
+	Title         string
+	InnerContexts []*Context
 }
 
 // Could be either block or inline context.
 type NoWikiContext struct {
 	BaseContext
-	Text string
+	IsBlock bool
+	Text    string
 }
 
 type HTMLContext struct {
@@ -58,6 +54,8 @@ type HTMLContext struct {
 }
 
 // Block Contexts
+
+// SectionHeaderContext can have bold or other text effect in it, nor links.
 type SectionHeaderContext struct {
 	BaseContext
 	HeaderLevel int
@@ -66,35 +64,37 @@ type SectionHeaderContext struct {
 
 type ListContext struct {
 	BaseContext
-	Ordered bool
+	Ordered       bool
+	InnerContexts []*Context
 }
 
+// Footer can contain: Text Effect, Links, Media FIles, NoWiki, Code
 type FooterContext struct {
 	BaseContext
+	Content *TransientBlockContext
 }
 
 type CodeFileContext struct {
 	BaseContext
 	IsCode bool
+	Text   string
 	// Only valid when IsCode is false
 	FileName string
-	Text     string
 }
 
-//TODO: phase 2
-type QuoteContext struct {
+// Transientblockcontext is a fake block context that is created to contain inline blocks.
+type TransientBlockContext struct {
 	BaseContext
-}
-
-//TODO: phase 2
-type TableContext struct {
-	BaseContext
+	InnerContexts []*Context
 }
 
 // Inline Contexts
+
+//Hyperlink text should not have effects.
 type HyperLinkContext struct {
 	BaseContext
 	HyperLink string
+	Text      string
 }
 
 type MediaContext struct {
