@@ -1,0 +1,32 @@
+I write a lot of things in dokuwiki format, so it would be really nice to have a parser of mine.
+
+ - List(2 space indentation, then * or - to represent unordered and ordered list.)
+ - sectioning(= indicates section, 4 dashes or more means a horizontal line.)
+ - footnote(double parenthesizes)
+ - in site link and out of site link
+ - basic text formatting(bold, etc.)
+ - media(only support image now.)
+ - nowiki tag
+ - code and file tag
+
+states: normal, html, code, file, nowiki
+
+normal: reading a line, check if it's list or section, if not, it's just normal text, then proceed, but check
+        things like media, text formatting, link and footnote.
+
+
+
+
+parseList(level)
+parsesection
+parseFootnote
+parseLink
+parseInlineFormat
+parseMedia
+parseCode
+parseFile
+parseNowiki
+
+indent
+deindent
+
