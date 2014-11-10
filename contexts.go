@@ -24,81 +24,106 @@ const (
 )
 
 type Context interface {
-	GetParentContext() *Context
+	GetParentContext() Context
+	SetParentContext(Context)
 }
 
 type BaseContext struct {
-	parent *Context
+	parent Context
 }
 
-func (p *BaseContext) GetParentContext() *Context {
-	return p.parent
+func (b BaseContext) GetParentContext() Context {
+	return b.parent
+}
+
+func (b BaseContext) SetParentContext(pContext Context) {
+	b.parent = pContext
 }
 
 type ParseUnit struct {
 	BaseContext
-	Title         string
-	InnerContexts []*Context
+	Title    string
+	Sections []BlockContext
 }
 
-// Could be either block or inline context.
-type NoWikiContext struct {
+type BlockContext interface {
+	Context
+	block()
+}
+
+type BaseBlockContext struct {
 	BaseContext
-	IsBlock bool
-	Text    string
 }
 
-type HTMLContext struct {
-	BaseContext
-	Text string
-}
+func (b BaseBlockContext) block() {}
 
-// Block Contexts
-
-// SectionHeaderContext can have bold or other text effect in it, nor links.
+// SectionHeader can have bold or other text effect in it, nor links.
+// SectionHeader should be the beginning of a line,  no whitespace before it.
 type SectionHeaderContext struct {
-	BaseContext
+	BaseBlockContext
 	HeaderLevel int
-	Text        string
+	HeaderText  string
 }
 
 type ListContext struct {
-	BaseContext
+	BaseBlockContext
+	Level         int
 	Ordered       bool
-	InnerContexts []*Context
+	InnerContexts []BlockContext
+}
+
+// ParaContext is a fake block context that is created to contain inline blocks.
+type ParaContext struct {
+	BaseBlockContext
+	rawText       string
+	InnerContexts []InlineContext
+}
+
+// Inline Contexts
+type InlineContext interface {
+	Context
+	inline()
+}
+
+type BaseInlineContext struct {
+	BaseContext
+}
+
+func (b BaseInlineContext) inline() {}
+
+type NoWikiContext struct {
+	BaseInlineContext
+	Text string
+}
+
+type HTMLContext struct {
+	BaseInlineContext
+	Text string
 }
 
 // Footer can contain: Text Effect, Links, Media FIles, NoWiki, Code
 type FooterContext struct {
-	BaseContext
-	Content *TransientBlockContext
+	BaseInlineContext
+	Content ParaContext
 }
 
 type CodeFileContext struct {
-	BaseContext
+	BaseInlineContext
 	IsCode bool
 	Text   string
 	// Only valid when IsCode is false
 	FileName string
 }
 
-// Transientblockcontext is a fake block context that is created to contain inline blocks.
-type TransientBlockContext struct {
-	BaseContext
-	InnerContexts []*Context
-}
-
-// Inline Contexts
-
 //Hyperlink text should not have effects.
 type HyperLinkContext struct {
-	BaseContext
+	BaseInlineContext
 	HyperLink string
 	Text      string
 }
 
 type MediaContext struct {
-	BaseContext
+	BaseInlineContext
 	MediaType    int
 	Width        int
 	Height       int
@@ -108,7 +133,7 @@ type MediaContext struct {
 }
 
 type TextEffectContext struct {
-	BaseContext
+	BaseInlineContext
 	EffectType uint32
 	Text       string
 }
