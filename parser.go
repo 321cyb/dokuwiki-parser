@@ -226,7 +226,6 @@ func replaceBytesWithMarker(lineBytes []byte, length int, marker []byte) []byte 
 
 func processContent(states *parserStates, blocks []wholeBlock) {
 	for _, block := range blocks {
-		fmt.Printf("type is %d\nheaderLevel is %d\nlistLevel is %d\nforceNewList is %v\ntext: %s\n\n", block.blockType, block.headerLevel, block.listLevel, block.forceNewList, string(block.rawText))
 		processLine(states, block)
 	}
 

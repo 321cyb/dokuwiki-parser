@@ -1,25 +1,22 @@
-We only support UTF8 input.
-
 I write a lot of things in dokuwiki format, so it would be really nice to have a parser of mine.
 
- - in site link and out of site link(double squares)
- - footnote(double parenthesizes)
- - media files(double curly braces)
- - basic text effect(bold, italic, underline, monospace.)
- - sectioning(= indicates section, 4 dashes or more means a horizontal line.)
- - List(2 space indentation, then * or - to represent unordered and ordered list.)
- - nowiki tag
- - code and file tag
- - html and HTML tag(HTML stands for block level elements)
+Syntax Supported:
 
-states: normal, html, code, file, nowiki
+- in site link and out of site link(double squares)
+- media files(double curly braces)
+- basic text effect(bold, italic, underline, monospace.)
+- sectioning(= indicates section, 4 dashes or more means a horizontal line.)
+- List(2 space indentation, then * or - to represent unordered and ordered list.)
+- nowiki tag
+- code and file tag
+- html and HTML tag(HTML stands for block level elements)
 
-normal: reading a line, check if it's list or section, if not, it's just normal text, then proceed, but check
-        things like media, text formatting, link and footnote.
-
+We only support UTF8 input.
 
 - table is not supported now, but is on roadmap.
 - quote is not supported now, but is on roadmap.
 - namespaced internal links is not in the plan.
 - php tag is not in the plan.
 - Text Conversions is not in the plan.
+- footnote is not in the plan.
+- horizontal line is not in the plan.
