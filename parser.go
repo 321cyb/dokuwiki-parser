@@ -35,6 +35,8 @@ const (
 var (
 	validSectionHeader = regexp.MustCompile(`^(=+)([^=]+)(=+)$`)
 	validListItem      = regexp.MustCompile(`^((  )+)([*-]) ((?s).*)$`)
+	validCodeStartTag  = regexp.MustCompile(`<code [a-zA-Z]+>$`)
+	validFileStartTag  = regexp.MustCompile(`<file [a-zA-Z]+ .+>$`)
 )
 
 type wholeBlock struct {
@@ -72,154 +74,160 @@ func Parse(origContent []byte, title string) *ParseUnit {
 		parseunit: parseunit,
 	}
 
-	linesChan := make(chan wholeBlock)
-	go generateLines(origContent, linesChan)
-	processContent(&states, linesChan)
+	blocks := generateLines(origContent)
+	processContent(&states, blocks)
 
 	return states.parseunit
 }
 
 // generatelines splits the raw content into lines, each line is a section or a list item or a normal paragraph.
 // also removing empty lines and extra new lines.
-func generateLines(origContent []byte, linesChan chan wholeBlock) {
+func generateLines(origContent []byte) []wholeBlock {
 	var isInCodeTag bool
 	var isInFileTag bool
 	var isInHTMLTag bool
 	var isInhtmlTag bool
 	var isInNoWikiTag bool
 
-	var needAnotherNewLine bool
-	var listBreaked bool
+	blocks := make([]wholeBlock, 0)
+	blockBytes := make([]byte, 0)
+	lastBlockBytes := blockBytes
 
 	// append this to make processing easier, there should be no major side effects to do this.
 	origContent = append(origContent, '\n')
+	physicalLines := bytes.Split(origContent, []byte{'\n'})
 
-	lineBytes := make([]byte, 0)
-	for _, b := range origContent {
-		if needAnotherNewLine {
-			needAnotherNewLine = false
-			if b == '\n' {
-				linesChan <- wholeBlock{
-					blockType: paraType,
-					rawText:   lineBytes,
-				}
-				lineBytes = make([]byte, 0)
-			} else {
-				lineBytes = append(lineBytes, '\n')
-			}
-			continue
-		}
-
-		if b == '\n' {
-			//			fmt.Printf("LineBytes(%v): %s\n\n", (isInCodeTag || isInFileTag || isInHTMLTag || isInhtmlTag || isInNoWikiTag), string(lineBytes))
-			if isInCodeTag || isInFileTag || isInHTMLTag || isInhtmlTag || isInNoWikiTag {
-				lineBytes = append(lineBytes, b)
-			} else {
-				if len(bytes.TrimSpace(lineBytes)) > 0 {
-					headerLevel, headerContent := parseSectionHeader(lineBytes)
-					if headerLevel > 0 {
-						linesChan <- wholeBlock{
-							blockType:   sectionHeaderType,
-							headerLevel: headerLevel,
-							rawText:     headerContent,
-						}
-						lineBytes = make([]byte, 0)
-					} else {
-						listLevel, isOrdered, itemBytes := parseListItem(lineBytes)
-						if listLevel > 0 {
-							block := wholeBlock{
-								listLevel: listLevel,
-								rawText:   itemBytes,
-							}
-							block.forceNewList = listBreaked
-							if isOrdered {
-								block.blockType = orderedListType
-							} else {
-								block.blockType = unOrderedListType
-							}
-							linesChan <- block
-							lineBytes = make([]byte, 0)
-						} else {
-							// This line is not a section header nor a list item,
-							// to be a complete paragraph, it needs another new line.
-							needAnotherNewLine = true
-						}
-					}
-					listBreaked = false
-				} else {
-					// empty line or consecutive new lines.
-					listBreaked = true
-				}
-			}
-		} else {
-			lineBytes = append(lineBytes, b)
+	for physicalLineIndex, physicalLine := range physicalLines {
+		for _, b := range physicalLine {
+			blockBytes = append(blockBytes, b)
 			if b == '>' {
-				fmt.Printf("LineBytes(%v): %s\n\n", (isInCodeTag || isInFileTag || isInHTMLTag || isInhtmlTag || isInNoWikiTag), string(lineBytes))
-				if bytes.HasSuffix(lineBytes, []byte{'<', 'c', 'o', 'd', 'e', '>'}) {
+				if matchedLen := bytesEndsWithRegexp(blockBytes, validCodeStartTag); matchedLen > 0 {
 					if !(isInCodeTag || isInFileTag || isInHTMLTag || isInhtmlTag || isInNoWikiTag) {
 						isInCodeTag = true
-						lineBytes = replaceBytesWithMarker(lineBytes, len("<code>"), startOfCodeTag)
+						blockBytes = replaceBytesWithMarker(blockBytes, matchedLen, startOfCodeTag)
 					}
-				} else if bytes.HasSuffix(lineBytes, []byte{'<', '/', 'c', 'o', 'd', 'e', '>'}) {
+				} else if bytes.HasSuffix(blockBytes, []byte{'<', '/', 'c', 'o', 'd', 'e', '>'}) {
 					isInCodeTag = false
-					lineBytes = replaceBytesWithMarker(lineBytes, len("</code>"), endOfCodeTag)
-				} else if bytes.HasSuffix(lineBytes, []byte{'<', 'f', 'i', 'l', 'e', '>'}) {
+					blockBytes = replaceBytesWithMarker(blockBytes, len("</code>"), endOfCodeTag)
+				} else if matchedLen := bytesEndsWithRegexp(blockBytes, validFileStartTag); matchedLen > 0 {
 					if !(isInCodeTag || isInFileTag || isInHTMLTag || isInhtmlTag || isInNoWikiTag) {
 						isInFileTag = true
-						lineBytes = replaceBytesWithMarker(lineBytes, len("<file>"), startOfFileTag)
+						blockBytes = replaceBytesWithMarker(blockBytes, matchedLen, startOfFileTag)
 					}
-				} else if bytes.HasSuffix(lineBytes, []byte{'<', '/', 'f', 'i', 'l', 'e', '>'}) {
+				} else if bytes.HasSuffix(blockBytes, []byte{'<', '/', 'f', 'i', 'l', 'e', '>'}) {
 					isInFileTag = false
-					lineBytes = replaceBytesWithMarker(lineBytes, len("</file>"), endOfFileTag)
-				} else if bytes.HasSuffix(lineBytes, []byte{'<', 'h', 't', 'm', 'l', '>'}) {
+					blockBytes = replaceBytesWithMarker(blockBytes, len("</file>"), endOfFileTag)
+				} else if bytes.HasSuffix(blockBytes, []byte{'<', 'h', 't', 'm', 'l', '>'}) {
 					if !(isInCodeTag || isInFileTag || isInHTMLTag || isInhtmlTag || isInNoWikiTag) {
 						isInhtmlTag = true
-						lineBytes = replaceBytesWithMarker(lineBytes, len("<html>"), startOfhtmlTag)
+						blockBytes = replaceBytesWithMarker(blockBytes, len("<html>"), startOfhtmlTag)
 					}
-				} else if bytes.HasSuffix(lineBytes, []byte{'<', '/', 'h', 't', 'm', 'l', '>'}) {
+				} else if bytes.HasSuffix(blockBytes, []byte{'<', '/', 'h', 't', 'm', 'l', '>'}) {
 					isInhtmlTag = false
-					lineBytes = replaceBytesWithMarker(lineBytes, len("</html>"), endOfhtmlTag)
-				} else if bytes.HasSuffix(lineBytes, []byte{'<', 'H', 'T', 'M', 'L', '>'}) {
+					blockBytes = replaceBytesWithMarker(blockBytes, len("</html>"), endOfhtmlTag)
+				} else if bytes.HasSuffix(blockBytes, []byte{'<', 'H', 'T', 'M', 'L', '>'}) {
 					if !(isInCodeTag || isInFileTag || isInHTMLTag || isInhtmlTag || isInNoWikiTag) {
 						isInHTMLTag = true
-						lineBytes = replaceBytesWithMarker(lineBytes, len("<HTML>"), startOfHTMLTag)
+						blockBytes = replaceBytesWithMarker(blockBytes, len("<HTML>"), startOfHTMLTag)
 					}
-				} else if bytes.HasSuffix(lineBytes, []byte{'<', '/', 'H', 'T', 'M', 'L', '>'}) {
+				} else if bytes.HasSuffix(blockBytes, []byte{'<', '/', 'H', 'T', 'M', 'L', '>'}) {
 					isInHTMLTag = false
-					lineBytes = replaceBytesWithMarker(lineBytes, len("</HTML>"), endOfHTMLTag)
-				} else if bytes.HasSuffix(lineBytes, []byte{'<', 'n', 'o', 'w', 'i', 'k', 'i', '>'}) {
+					blockBytes = replaceBytesWithMarker(blockBytes, len("</HTML>"), endOfHTMLTag)
+				} else if bytes.HasSuffix(blockBytes, []byte{'<', 'n', 'o', 'w', 'i', 'k', 'i', '>'}) {
 					if !(isInCodeTag || isInFileTag || isInHTMLTag || isInhtmlTag || isInNoWikiTag) {
 						isInNoWikiTag = true
-						lineBytes = replaceBytesWithMarker(lineBytes, len("<nowiki>"), startOfNoWikiTag)
+						blockBytes = replaceBytesWithMarker(blockBytes, len("<nowiki>"), startOfNoWikiTag)
 					}
-				} else if bytes.HasSuffix(lineBytes, []byte{'<', '/', 'n', 'o', 'w', 'i', 'k', 'i', '>'}) {
+				} else if bytes.HasSuffix(blockBytes, []byte{'<', '/', 'n', 'o', 'w', 'i', 'k', 'i', '>'}) {
 					isInNoWikiTag = false
-					lineBytes = replaceBytesWithMarker(lineBytes, len("</nowiki>"), endOfNoWikiTag)
+					blockBytes = replaceBytesWithMarker(blockBytes, len("</nowiki>"), endOfNoWikiTag)
 				}
+			}
+		}
+
+		// process new line
+		if isInCodeTag || isInFileTag || isInHTMLTag || isInhtmlTag || isInNoWikiTag {
+			blockBytes = append(blockBytes, '\n')
+		} else {
+			if len(bytes.TrimSpace(blockBytes)) > 0 {
+				headerLevel, headerContent := parseSectionHeader(blockBytes)
+				if headerLevel > 0 {
+					blocks = append(blocks, wholeBlock{
+						blockType:   sectionHeaderType,
+						headerLevel: headerLevel,
+						rawText:     headerContent,
+					})
+					lastBlockBytes = blockBytes
+					blockBytes = make([]byte, 0)
+				} else {
+					listLevel, isOrdered, itemBytes := parseListItem(blockBytes)
+					if listLevel > 0 {
+						block := wholeBlock{
+							listLevel: listLevel,
+							rawText:   itemBytes,
+						}
+						block.forceNewList = len(bytes.TrimSpace(lastBlockBytes)) == 0
+						if isOrdered {
+							block.blockType = orderedListType
+						} else {
+							block.blockType = unOrderedListType
+						}
+						blocks = append(blocks, block)
+						lastBlockBytes = blockBytes
+						blockBytes = make([]byte, 0)
+					} else {
+						nextPhysicalLine := []byte("")
+						if physicalLineIndex < (len(physicalLines) - 1) {
+							nextPhysicalLine = physicalLines[physicalLineIndex+1]
+						}
+						currentBlockStopsHere := false
+						if len(bytes.TrimSpace(nextPhysicalLine)) == 0 {
+							currentBlockStopsHere = true
+						} else if l, _, _ := parseListItem(nextPhysicalLine); l > 0 {
+							currentBlockStopsHere = true
+						} else if l, _ := parseSectionHeader(nextPhysicalLine); l > 0 {
+							currentBlockStopsHere = true
+						} else {
+							// treat new line as whitespace.
+							blockBytes = append(blockBytes, ' ')
+						}
+						if currentBlockStopsHere {
+							blocks = append(blocks, wholeBlock{
+								blockType: paraType,
+								rawText:   blockBytes,
+							})
+							lastBlockBytes = blockBytes
+							blockBytes = make([]byte, 0)
+						}
+					}
+				}
+			} else {
+				lastBlockBytes = blockBytes
+				blockBytes = make([]byte, 0)
 			}
 		}
 	}
 
-	// END OF PROCESSING
-	linesChan <- wholeBlock{}
+	return blocks
+}
+
+// return value is the length of matched part, 0 means not match.
+func bytesEndsWithRegexp(bts []byte, re *regexp.Regexp) int {
+	groups := re.FindSubmatch(bts)
+	if groups != nil {
+		return len(groups[0])
+	}
+	return 0
 }
 
 func replaceBytesWithMarker(lineBytes []byte, length int, marker []byte) []byte {
 	return append(lineBytes[:len(lineBytes)-length], marker...)
 }
 
-func processContent(states *parserStates, linesChan chan wholeBlock) {
-blockProcessor:
-	for {
-		select {
-		case block := <-linesChan:
-			if block.blockType == noneType {
-				break blockProcessor
-			} else {
-				//				fmt.Printf("type is %d\nheaderLevel is %d\nlistLevel is %d\nforceNewList is %v\ntext: %s\n\n", block.blockType, block.headerLevel, block.listLevel, block.forceNewList, string(block.rawText))
-				processLine(states, block)
-			}
-		}
+func processContent(states *parserStates, blocks []wholeBlock) {
+	for _, block := range blocks {
+		fmt.Printf("type is %d\nheaderLevel is %d\nlistLevel is %d\nforceNewList is %v\ntext: %s\n\n", block.blockType, block.headerLevel, block.listLevel, block.forceNewList, string(block.rawText))
+		processLine(states, block)
 	}
 
 	//Now the skeleton is constructed, go on processing inline elements

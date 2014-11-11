@@ -109,10 +109,7 @@ type FooterContext struct {
 
 type CodeFileContext struct {
 	BaseInlineContext
-	IsCode bool
-	Text   string
-	// Only valid when IsCode is false
-	FileName string
+	Text string
 }
 
 //Hyperlink text should not have effects.

@@ -35,6 +35,12 @@ func TestReplaceBytes(t *testing.T) {
 	}
 }
 
+func TestFileStartTag(t *testing.T) {
+	if matchedLen := bytesEndsWithRegexp([]byte("<file mysql abc.sql>"), validFileStartTag); matchedLen == 0 {
+		t.Fail()
+	}
+}
+
 func TestA(t *testing.T) {
 	ParseFile("/home/turing/how_to_write_a_compiler.txt")
 }
