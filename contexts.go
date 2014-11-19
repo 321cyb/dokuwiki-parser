@@ -1,26 +1,16 @@
 package dokuwiki
 
 const (
-	MediaTypePicture = iota
-	MediaTypeVideo
-	MediaTypeAudio
-	MediaTypeFlash
-)
-
-const (
 	AlignLeft = iota
 	AlignCenter
 	AlignRight
 )
 
 const (
-	TextEffectBold        = 1 << iota
-	TextEffectItalic      = 1 << iota
-	TextEffectUnderline   = 1 << iota
-	TextEffectMonoSpace   = 1 << iota
-	TextEffectSubScript   = 1 << iota
-	TextEffectSuperScript = 1 << iota
-	TextEffectDeleted     = 1 << iota
+	TextEffectBold      = 1 << iota
+	TextEffectItalic    = 1 << iota
+	TextEffectUnderline = 1 << iota
+	TextEffectMonoSpace = 1 << iota
 )
 
 type Context interface {
@@ -101,12 +91,6 @@ type HTMLContext struct {
 	Text string
 }
 
-// Footer can contain: Text Effect, Links, Media FIles, NoWiki, Code
-type FooterContext struct {
-	BaseInlineContext
-	Content ParaContext
-}
-
 type CodeFileContext struct {
 	BaseInlineContext
 	Text string
@@ -115,15 +99,15 @@ type CodeFileContext struct {
 //Hyperlink text should not have effects.
 type HyperLinkContext struct {
 	BaseInlineContext
-	HyperLink string
-	Text      string
+	HyperLink  string
+	Text       string
+	IsInternal bool
 }
 
 type MediaContext struct {
 	BaseInlineContext
-	MediaType    int
-	Width        int
-	Height       int
+	Width        int64
+	Height       int64
 	Align        int
 	Title        string
 	MediaResouce string

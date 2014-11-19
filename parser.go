@@ -2,11 +2,12 @@ package dokuwiki
 
 import (
 	"bytes"
-	"fmt"
+	_ "fmt"
 	"io"
 	"io/ioutil"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -37,6 +38,8 @@ var (
 	validListItem      = regexp.MustCompile(`^((  )+)([*-]) ((?s).*)$`)
 	validCodeStartTag  = regexp.MustCompile(`<code [a-zA-Z]+>$`)
 	validFileStartTag  = regexp.MustCompile(`<file [a-zA-Z]+ .+>$`)
+	validMedia         = regexp.MustCompile(`^(.*?)(\?\d+(x\d+)?)?$`)
+	validURL           = regexp.MustCompile(`(https?|ftp)://[^\s/$.?#].[^\s]*`)
 )
 
 type wholeBlock struct {
@@ -322,105 +325,212 @@ func processLine(states *parserStates, block wholeBlock) {
 func walkAST(states *parserStates) {
 }
 
-/*
-func processCharacter(states *parserStates, character byte) {
-	if states.isInTag() {
-		if character == '<' {
-			processLeftBracket(states)
-		} else {
-			states.currentContent = append(states.currentContent, character)
-		}
-	} else {
-		switch character {
-		case '\n':
-			processNewLine(states)
-		case '\'':
+//TODO: http in ordinary text,
+//TODO: add offset
+func parsePara(c *ParaContext) {
+	rawTextBytes := []byte(c.rawText)
+
+	var currentEffect uint32 = 0
+	effectBytes := make([]byte, 0)
+	offset := 0
+
+	for offset < len(rawTextBytes) {
+		ch := rawTextBytes[offset]
+		switch ch {
+		case 0x00:
+			//This is the beginning or end of a tag.
+			nextByte := rawTextBytes[offset+1]
+			if nextByte == 1 || nextByte == 3 || nextByte == 5 || nextByte == 7 || nextByte == 9 {
+				endCurrentEffect(c, &effectBytes, currentEffect)
+				currentEffect = 0
+			}
+
+			switch nextByte {
+			case 1:
+				if i := bytes.Index(rawTextBytes[offset:], endOfCodeTag); i != -1 {
+					c.InnerContexts = append(c.InnerContexts, CodeFileContext{
+						BaseInlineContext: BaseInlineContext{BaseContext{parent: *c}},
+						Text:              string(rawTextBytes[offset+2 : offset+i]),
+					})
+				} else {
+					panic("no endOfCode tag found!")
+				}
+			case 3:
+				if i := bytes.Index(rawTextBytes[offset:], endOfFileTag); i != -1 {
+					c.InnerContexts = append(c.InnerContexts, CodeFileContext{
+						BaseInlineContext: BaseInlineContext{BaseContext{parent: *c}},
+						Text:              string(rawTextBytes[offset+2 : offset+i]),
+					})
+				} else {
+					panic("no endOfFile tag found!")
+				}
+			case 5:
+				if i := bytes.Index(rawTextBytes[offset:], endOfHTMLTag); i != -1 {
+					c.InnerContexts = append(c.InnerContexts, HTMLContext{
+						BaseInlineContext: BaseInlineContext{BaseContext{parent: *c}},
+						Text:              string(rawTextBytes[offset+2 : offset+i]),
+					})
+				} else {
+					panic("no endOfHTML tag found!")
+				}
+			case 7:
+				if i := bytes.Index(rawTextBytes[offset:], endOfhtmlTag); i != -1 {
+					c.InnerContexts = append(c.InnerContexts, HTMLContext{
+						BaseInlineContext: BaseInlineContext{BaseContext{parent: *c}},
+						Text:              string(rawTextBytes[offset+2 : offset+i]),
+					})
+				} else {
+					panic("no endOfhtml tag found!")
+				}
+			case 9:
+				if i := bytes.Index(rawTextBytes[offset:], endOfNoWikiTag); i != -1 {
+					c.InnerContexts = append(c.InnerContexts, NoWikiContext{
+						BaseInlineContext: BaseInlineContext{BaseContext{parent: *c}},
+						Text:              string(rawTextBytes[offset+2 : offset+i]),
+					})
+				} else {
+					panic("no endOfNoWiki tag found!")
+				}
+			}
+		case '`':
+			if rawTextBytes[offset+1] == '`' {
+				endCurrentEffect(c, &effectBytes, currentEffect)
+				if (currentEffect & TextEffectMonoSpace) > 0 {
+					currentEffect ^= TextEffectMonoSpace
+				} else {
+					currentEffect |= TextEffectMonoSpace
+				}
+			} else {
+				effectBytes = append(effectBytes, ch)
+			}
 		case '_':
+			if rawTextBytes[offset+1] == '_' {
+				endCurrentEffect(c, &effectBytes, currentEffect)
+				if (currentEffect & TextEffectUnderline) > 0 {
+					currentEffect ^= TextEffectUnderline
+				} else {
+					currentEffect |= TextEffectUnderline
+				}
+			} else {
+				effectBytes = append(effectBytes, ch)
+			}
 		case '/':
-		case '=':
+			if rawTextBytes[offset+1] == '/' {
+				endCurrentEffect(c, &effectBytes, currentEffect)
+				if (currentEffect & TextEffectItalic) > 0 {
+					currentEffect ^= TextEffectItalic
+				} else {
+					currentEffect |= TextEffectItalic
+				}
+			} else {
+				effectBytes = append(effectBytes, ch)
+			}
 		case '*':
-		case '-':
-		case '<':
-			processLeftBracket(states)
+			if rawTextBytes[offset+1] == '*' {
+				endCurrentEffect(c, &effectBytes, currentEffect)
+				if (currentEffect & TextEffectBold) > 0 {
+					currentEffect ^= TextEffectBold
+				} else {
+					currentEffect |= TextEffectBold
+				}
+			} else {
+				effectBytes = append(effectBytes, ch)
+			}
 		case '[':
-		case ']':
+			if rawTextBytes[offset+1] == '[' {
+				// start of a link.
+				if i := bytes.Index(rawTextBytes[offset:], []byte{']', ']'}); i != -1 {
+					endCurrentEffect(c, &effectBytes, currentEffect)
+					currentEffect = 0
+					parseLink(c, rawTextBytes[offset+2:offset+i])
+					offset += (i + 2)
+				}
+			}
 		case '{':
-		case '}':
-
+			if rawTextBytes[offset+1] == '{' {
+				// start of a media file.
+				if i := bytes.Index(rawTextBytes[offset:], []byte{'}', '}'}); i != -1 {
+					endCurrentEffect(c, &effectBytes, currentEffect)
+					currentEffect = 0
+					parseMedia(c, rawTextBytes[offset+2:offset+i])
+					offset += (i + 2)
+				}
+			}
 		default:
-			if character == '\n' || character == '\t' || character == ' ' {
-			}
+			effectBytes = append(effectBytes, ch)
+			offset += 1
 		}
 	}
 
+	//fixup for links.
+	fixupLinks(c)
 }
 
-// advanceIfMatch consumes the buffered reader if the text matches.
-func advanceIfMatch(states *parserStates, text string, caseSensitive bool) bool {
-	nbytes := len(text)
-	ahead := string(states.origContent[states.offset : states.offset+nbytes])
-	matches := false
-	if err == nil {
-		if caseSensitive {
-			if ahead == text {
-				matches = true
-			}
+func parseLink(c *ParaContext, linkBytes []byte) {
+	if i := bytes.IndexByte(linkBytes, '|'); i != -1 {
+		c.InnerContexts = append(c.InnerContexts, HyperLinkContext{
+			BaseInlineContext: BaseInlineContext{BaseContext{parent: *c}},
+			Text:              string(linkBytes[i+1:]),
+			HyperLink:         string(linkBytes[:i]),
+		})
+	} else {
+		// internal link
+		c.InnerContexts = append(c.InnerContexts, HyperLinkContext{
+			BaseInlineContext: BaseInlineContext{BaseContext{parent: *c}},
+			Text:              string(linkBytes),
+			IsInternal:        true,
+		})
+	}
+}
+
+func parseMedia(c *ParaContext, mediaBytes []byte) {
+	mc := MediaContext{
+		BaseInlineContext: BaseInlineContext{BaseContext{parent: *c}},
+	}
+
+	bytesLeft := mediaBytes
+	if i := bytes.IndexByte(mediaBytes, '|'); i != -1 {
+		mc.Title = string(mediaBytes[i+1:])
+		bytesLeft = mediaBytes[:i]
+	}
+
+	if bytesLeft[0] == ' ' {
+		mc.Align = AlignLeft
+		bytesLeft = bytesLeft[1:]
+	} else if bytesLeft[len(bytesLeft)-1] == ' ' {
+		mc.Align = AlignRight
+		bytesLeft = bytesLeft[:len(bytesLeft)-1]
+	} else {
+		mc.Align = AlignCenter
+	}
+
+	groups := validMedia.FindSubmatch(bytesLeft)
+	if groups != nil && len(groups[2]) > 0 {
+		dimentions := groups[2][1 : len(groups[2])-1]
+		if i := bytes.Index(dimentions, []byte{'x'}); i != -1 {
+			mc.Width, _ = strconv.ParseInt(string(dimentions[:i]), 10, 64)
+			mc.Height, _ = strconv.ParseInt(string(dimentions[i+1:]), 10, 64)
 		} else {
-			if strings.ToLower(ahead) == strings.ToLower(text) {
-				matches = true
-			}
+			mc.Width, _ = strconv.ParseInt(string(dimentions), 10, 64)
 		}
 	}
-	if matches {
-		states.offset += nbytes
-	}
-	return matches
+	mc.MediaResouce = string(groups[1])
+
+	c.InnerContexts = append(c.InnerContexts, mc)
 }
 
-// processnewline is only called in Non Tag state.
-func processNewLine(states *parserStates) {
-	nextIsNewLine := states.origContent[states.offset+1] == '\n'
-
-	for {
-		c := states.origContent[states.offset]
-		if c != '\n' && c != '\t' && c != ' ' {
-			break
-		}
-		states.offset++
+func endCurrentEffect(c *ParaContext, effectBytes *[]byte, currentEffect uint32) {
+	if len(*effectBytes) == 0 {
+		return
 	}
 
-	nextLineBytes := peekNextLine(states)
-
-	switch states.currentContext.(type) {
-	case *SectionContext:
-		states.currentContext.HeaderText = string(states.currentContent)
-	case *ListContext:
-	case *ParaContext:
-		if !nextIsNewLine {
-
-			return
-		}
-
-	default:
-		fmt.Fprintln("processNewLine error: wrong currentContext")
-		panic()
-	}
+	c.InnerContexts = append(c.InnerContexts, TextEffectContext{
+		BaseInlineContext: BaseInlineContext{BaseContext{parent: *c}},
+		EffectType:        currentEffect,
+		Text:              string(*effectBytes),
+	})
+	*effectBytes = make([]byte, 0)
 }
-
-// peek the next line starts from current offset
-func peekNextLine(states *parserStates) []byte {
-	var nextLineBytes []byte
-	newLineOffset := states.offset
-	for {
-		if newLineOffset >= len(states.origContent) || states.origContent[newLineOffset] != '\n' {
-			break
-		}
-		nextLineBytes = append(nextLineBytes, states.origContent[newLineOffset])
-		newLineOffset++
-	}
-	return nextLineBytes
-}
-*/
 
 // returns the section header level, 0 means not a header.
 func parseSectionHeader(line []byte) (int, []byte) {
@@ -430,6 +540,54 @@ func parseSectionHeader(line []byte) (int, []byte) {
 		return len(groups[1]), []byte(strings.TrimSpace(groups[2]))
 	}
 	return 0, nil
+}
+
+func fixupLinks(c *ParaContext) {
+	for {
+		if scanParaOnce(c) == false {
+			return
+		}
+	}
+}
+
+// scanparaonce returns false when there is no links found.
+func scanParaOnce(c *ParaContext) bool {
+	for i := 0; i < len(c.InnerContexts); i++ {
+		if tc, ok := c.InnerContexts[i].(TextEffectContext); ok {
+			groups := validURL.FindStringSubmatchIndex(tc.Text)
+			if groups != nil {
+				newContenxts := make([]InlineContext, 0)
+				before := []byte(tc.Text)[:groups[0]]
+				if len(bytes.TrimSpace(before)) > 0 {
+					newContenxts = append(newContenxts, TextEffectContext{
+						BaseInlineContext: BaseInlineContext{BaseContext{parent: *c}},
+						EffectType:        tc.EffectType,
+						Text:              string(before),
+					})
+				}
+				newContenxts = append(newContenxts, HyperLinkContext{
+					BaseInlineContext: BaseInlineContext{BaseContext{parent: *c}},
+					Text:              string([]byte(tc.Text)[groups[0]:groups[1]]),
+					HyperLink:         string([]byte(tc.Text)[groups[0]:groups[1]]),
+				})
+				after := []byte(tc.Text)[groups[1]:]
+				if len(bytes.TrimSpace(after)) > 0 {
+					newContenxts = append(newContenxts, TextEffectContext{
+						BaseInlineContext: BaseInlineContext{BaseContext{parent: *c}},
+						EffectType:        tc.EffectType,
+						Text:              string(after),
+					})
+				}
+				if i < len(c.InnerContexts)-1 {
+					c.InnerContexts = append(append(c.InnerContexts[:i], newContenxts...), c.InnerContexts[i+1:]...)
+				} else {
+					c.InnerContexts = append(c.InnerContexts[:i], newContenxts...)
+				}
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // returns the list item level, 0 means not a list

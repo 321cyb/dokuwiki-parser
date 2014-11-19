@@ -20,3 +20,8 @@ We only support UTF8 input.
 - Text Conversions is not in the plan.
 - footnote is not in the plan.
 - horizontal line is not in the plan.
+= superscript and subscript are not supported.
+- delete effect is not supported.
+= Do not support \\
+- For links, do not support namespace, linking to specific section, Interwiki link, windows share and image links.
+- For media, only support image.
